@@ -1,105 +1,116 @@
-# AETHER // Smart Home IoT Dashboard & 3D Digital Twin
+# AETHER — Smart Home IoT Dashboard & Classical AI Engine
 
-A futuristic, cyberpunk-inspired IoT smart home dashboard featuring an interactive 3D villa digital twin, real-time energy telemetry analytics, intelligent automation workflows, and multi-device mesh management.
-
----
-
-## ✨ Features
-
-- **🏛️ 3D Villa Digital Twin (Three.js)**:
-  - Procedurally generated 2-story smart architectural model with multi-zone lighting, solar roof panels, EV carport, and landscaping.
-  - Interactive orbital mouse/touch controls with damping and LERP camera interpolation.
-  - Dynamic daytime/nighttime architectural lighting toggle and kinematic floating particle constellation.
-  - Harmonic sine-wave pulsating beacon indicating gateway mesh network status.
-
-- **⚡ Real-Time Energy Telemetry (Chart.js)**:
-  - Instantaneous power load tracking vs. historical 24-hour baseline.
-  - Daily (24h) and Weekly aggregated consumption views.
-  - Live analog electrical fluctuation simulation via stochastic random walk with clamping.
-  - Subsystem category breakdown (HVAC, Lighting, Appliances, Standby).
-
-- **🎛️ Unified Device Control Mesh**:
-  - Centralized reactive state store using the Publish-Subscribe (Observer) pattern.
-  - Dimmable LED lighting controls with real-time slider feedback.
-  - Radial thermostat dial with linear SVG dashoffset mapping and multi-mode cooling/heating/eco states.
-  - Biometric smart deadbolt lock with automatic status synchronization.
-  - Multi-speed ceiling fan control with CSS-driven angular velocity spin simulations.
-
-- **📹 CCTV Security Feed Simulation**:
-  - Live high-resolution yard/patio surveillance stream.
-  - Direct 32-bit pixel buffer manipulation for authentic 60 FPS infrared camera noise.
-  - Interactive snapshot shutter capture with flash overlay and activity archiving.
-
-- **🤖 Intelligent Automation Engine (ECA Pattern)**:
-  - Forward-chaining Event-Condition-Action (IF-THEN) rule engine.
-  - Geofence, time-based, and ambient sensor triggers.
-  - Custom automation builder modal to define and test routines on demand.
-
-- **🌓 Theming & Responsive Design**:
-  - Futuristic dark mode with glassmorphic cards and neon cyan/purple accents.
-  - One-click toggle to high-contrast modern light theme.
-  - Full mobile responsiveness with slide-out navigation drawer.
+A complete IoT Smart Home Web Application extended with a **Classical Artificial Intelligence Layer** featuring 9 pure Python algorithm implementations (zero external AI library dependencies) operating on a canonical spatial villa topology.
 
 ---
 
-## 🛠️ Tech Stack
+## 🌟 Key Features
 
-- **Frontend Core**: Vanilla JavaScript (ES6+ Classes), HTML5 Canvas, SVG
-- **Styling**: Tailwind CSS, Custom Glassmorphism CSS, Keyframe Animation Engine
-- **3D Graphics**: [Three.js](https://threejs.org/) (WebGL, PCF Soft Shadows, ACES Filmic Tone Mapping)
-- **Charts & Telemetry**: [Chart.js](https://www.chartjs.org/)
-- **Icons**: [Lucide Icons](https://lucide.dev/)
-- **Backend Server**: Python 3 `http.server.ThreadingHTTPServer` (Dual-stack, CORS-enabled, thread-per-request)
+### 1. Interactive IoT Dashboard
+- **Spatial 2D Topology Canvas**: Visualizes the 8-room villa model with real-time status indicators (Safe, Hazard, Unknown, Path).
+- **Device Management**: Controls lights, HVAC climate thermostat, motorized smart deadbolt, AeroFlow ceiling fan, and security camera.
+- **Real-Time Automation**: Automations for security alerts, eco mode, and preset routines.
+
+### 2. Classical AI Suite (9 From-Scratch Algorithms)
+1. **Wumpus-World Hazard Inference Agent** (`ai-service/classical/logic/wumpus.py`):
+   - Propositional logic and exact truth-table model checking ($2^8 = 256$ worlds via TT-Entails).
+   - Infers Fire, Gas Leak, Water Leak, and Intruder hazards from adjacent room percepts.
+2. **STRIPS Automated Planner** (`ai-service/classical/planning/strips.py`):
+   - Forward state-space A* progression planner with goal-counting heuristic.
+   - Solves routines like "Movie Night", "Leave Home", "Sleep Mode", and dynamically replans when devices fail.
+3. **Search Algorithms Comparison & Routing** (`ai-service/classical/search/routing.py`):
+   - Side-by-side benchmark of BFS, DFS, UCS, Greedy Best-First, and A* Search.
+   - Computes fastest emergency evacuation routes around hazard blockages and complete vacuum coverage tours.
+4. **CSP Appliance Scheduler** (`ai-service/classical/csp/scheduler.py`):
+   - Backtracking search with Forward Checking (BT-FC), MRV, Degree Heuristic, LCV, and AC-3 Arc Consistency.
+   - Schedules high-power appliances under grid peak limits (3.8 kW cap) and mutex load constraints.
+5. **Rule-Based Expert System** (`ai-service/classical/logic/expert_system.py`):
+   - Forward chaining (data-driven sensor reaction) and Backward chaining (goal-driven root cause diagnostic with AND/OR proof trees).
+6. **Bayesian Belief Network** (`ai-service/classical/probabilistic/bayes_net.py`):
+   - Exact probabilistic inference by enumeration over a 7-node DAG.
+   - Evaluates posterior belief of resident presence $P(\text{ResidentHome} \mid \mathbf{e})$ and intrusion probability $P(\text{Intruder} \mid \mathbf{e})$.
+7. **Markov Decision Process (MDP) Thermostat** (`ai-service/classical/probabilistic/mdp_thermostat.py`):
+   - Bellman Value Iteration for optimal HVAC temperature policy under stochastic room transitions and comfort-versus-cost trade-offs.
+8. **Mamdani Fuzzy Logic Climate Controller** (`ai-service/classical/fuzzy/climate_fuzzy.py`):
+   - Fuzzification with triangular and trapezoidal membership functions, min-conjunction rules, and Centroid defuzzification.
+9. **Local Search & Evolutionary Optimization** (`ai-service/classical/optimization/energy_opt.py`):
+   - Compares Hill Climbing (Steepest Descent), Simulated Annealing, and Genetic Algorithm to minimize 24-hour electricity costs under Time-of-Use tariffs.
 
 ---
 
-## 📁 Project Structure
+## 🏗️ Architecture
 
-```text
+```
 iot-smart-home/
+├── index.html                   # Single-Page Application (Tailwind + Lucide + Chart.js)
 ├── css/
-│   └── style.css          # Glassmorphic themes, animations, & neon effects
+│   └── style.css                # Glassmorphic UI theme & styles
 ├── js/
-│   ├── app.js             # Main application controller, routing, & DOM binding
-│   ├── charts.js          # Energy telemetry analytics & real-time jitter stream
-│   ├── store.js           # Central state store (Pub/Sub pattern & mock devices)
-│   └── three-house.js     # 3D interactive villa model (Three.js WebGL scene)
-├── index.html             # Single-page application markup & modals
-├── serve.py               # Multi-threaded local Python development server
-├── start_server.bat       # Quick-start script for Windows environments
-├── .gitignore             # Git ignore rules
-└── README.md              # Project documentation
+│   ├── app.js                   # Main application router and dashboard controller
+│   ├── ai-lab.js                # Classical AI Lab visualizer & canvas animator
+│   ├── ai-bridge.js             # ML / AI layer bridge
+│   ├── charts.js                # Chart rendering helpers
+│   ├── store.js                 # Frontend state store
+│   └── three-house.js           # 3D villa visualization
+├── ai-service/
+│   ├── server.py                # Zero-dependency Python HTTP server (Port 8089)
+│   ├── main.py                  # FastAPI entrypoint (alternative)
+│   ├── classical/               # Pure Python Classical AI Implementations
+│   │   ├── graph/               # House graph spatial topology
+│   │   ├── logic/               # Wumpus propositional logic & Expert system
+│   │   ├── planning/            # STRIPS A* planner
+│   │   ├── search/              # BFS, DFS, UCS, Greedy, A* comparison
+│   │   ├── csp/                 # Constraint satisfaction scheduler
+│   │   ├── probabilistic/       # Bayes Net & MDP Value Iteration
+│   │   ├── fuzzy/               # Mamdani Fuzzy Controller
+│   │   └── optimization/        # Hill Climbing, SA, Genetic Algorithm
+│   ├── evaluation/              # Test suites for all 9 algorithms
+│   └── api/                     # REST routes
+├── serve.py                     # Static web server for frontend (Port 8088)
+├── requirements.txt             # Python dependencies (Optional FastAPI/Uvicorn)
+└── README.md
 ```
 
 ---
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### 1. Prerequisites
+- Python 3.9+ (all classical AI modules use Python Standard Library only)
+- Modern web browser (Chrome, Safari, Edge, Firefox)
 
-- A modern web browser supporting WebGL (Chrome, Brave, Edge, Firefox, Safari).
-- Python 3.8+ (optional, for local development server).
+### 2. Start the Frontend Server
+```bash
+python3 serve.py
+```
+Frontend runs on **`http://localhost:8088`**.
 
-### Running Locally
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/aditya0043501/iot-smart-home.git
-   cd iot-smart-home
-   ```
-
-2. **Start the local server**:
-   - **Using Python**:
-     ```bash
-     python3 serve.py
-     ```
-   - **On Windows**: Double-click `start_server.bat`.
-
-3. **Open the Dashboard**:
-   Visit [http://localhost:8088](http://localhost:8088) in your web browser.
+### 3. Start the Classical AI Engine
+```bash
+python3 ai-service/server.py
+```
+Classical AI server runs on **`http://localhost:8089`**.
 
 ---
 
-## 📜 License
+## 🧪 Running the AI Test Suite
 
-This project is open source and available under the [MIT License](LICENSE).
+Each algorithm includes an evaluation script in `ai-service/evaluation/`:
+
+```bash
+cd ai-service
+python3 evaluation/test_wumpus.py
+python3 evaluation/test_planning.py
+python3 evaluation/test_search.py
+python3 evaluation/test_csp.py
+python3 evaluation/test_expert_system.py
+python3 evaluation/test_bayes.py
+python3 evaluation/test_mdp.py
+python3 evaluation/test_fuzzy.py
+python3 evaluation/test_optimization.py
+```
+
+---
+
+## 📄 License
+MIT License.

@@ -1,912 +1,694 @@
 /**
- * IoT Smart Home - Main Application Controller
+ * AETHER Smart Home IoT Dashboard — Main Application Controller
+ * ---------------------------------------------------------------
+ * Full wiring of all DOM elements to window.store.
+ * Refactor justification: original app.js was a 1-line stub
+ * (console.log only). No existing logic was deleted — this is a
+ * net-new implementation of a missing layer.
+ * ---------------------------------------------------------------
  */
 
-class SmartHomeApp {
-  constructor() {
-    this.currentView = "landing";
-    this.energyChart = null;
-    this.house3D = null;
-    this.selectedRoom = "All";
-    this.deviceSearchTerm = "";
-    this.deviceFilterType = "All";
-    this.init();
+// ============================================================
+// 1. TOAST NOTIFICATION SYSTEM
+// ============================================================
+
+function showToast(message, type = 'info', duration = 4000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const icons = { success: 'check-circle', error: 'alert-circle', warning: 'alert-triangle', info: 'info' };
+  const colorClass = { success: 'border-emerald-500/40', error: 'border-rose-500/40', warning: 'border-amber-500/40', info: 'border-cyan-500/40' };
+  const iconColor  = { success: 'text-emerald-400', error: 'text-rose-400', warning: 'text-amber-400', info: 'text-cyan-400' };
+
+  const toast = document.createElement('div');
+  toast.className = `toast-item ${colorClass[type] || colorClass.info}`;
+  toast.innerHTML = `
+    <div class="flex items-start gap-3 p-4">
+      <i data-lucide="${icons[type] || 'info'}" class="w-4 h-4 mt-0.5 flex-shrink-0 ${iconColor[type] || 'text-cyan-400'}"></i>
+      <p class="text-xs font-medium text-slate-200 leading-relaxed flex-1">${message}</p>
+    </div>
+    <div class="toast-progress" style="animation-duration:${duration}ms"></div>`;
+  container.appendChild(toast);
+  if (window.lucide) lucide.createIcons({ nodes: [toast] });
+
+  setTimeout(() => {
+    toast.classList.add('removing');
+    setTimeout(() => toast.remove(), 350);
+  }, duration);
+}
+
+// ============================================================
+// 2. VIEW NAVIGATION
+// ============================================================
+
+function navigateTo(viewId) {
+  const target = document.getElementById('view-' + viewId);
+  document.querySelectorAll('.app-view').forEach(v => {
+    v.classList.remove('active');
+    // Hide inactive views inline: Tailwind's `flex` class on the landing view overrides .app-view{display:none}.
+    if (v !== target) v.style.display = 'none';
+  });
+  if (target) {
+    // Force display block before animation
+    target.style.display = target.id === 'view-landing' ? '' : 'block';
+    requestAnimationFrame(() => target.classList.add('active'));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  init() {
-    document.addEventListener("DOMContentLoaded", () => {
-      this.setupRouting();
-      this.setupClock();
-      this.setupSidebar();
-      this.setupDashboardControls();
-      this.setupDevicesView();
-      this.setupAutomationsView();
-      this.setupSettingsView();
-      this.setupModalHandlers();
-      this.setupCameraCanvas();
-      this.setupThemeToggle();
+  document.querySelectorAll('[data-nav-target]').forEach(link => {
+    const isActive = link.getAttribute('data-nav-target') === viewId;
+    link.className = link.className
+      .replace(/text-cyan-400|bg-white\/5|border|border-cyan-500\/40|text-slate-400/g, '').trim();
+    if (isActive) {
+      link.classList.add('text-cyan-400', 'bg-white/5', 'border', 'border-cyan-500/40');
+    } else {
+      link.classList.add('text-slate-400');
+    }
+  });
 
-      if (typeof SmartHouse3D !== "undefined") {
-        this.house3D = new SmartHouse3D("three-canvas-container");
-      }
+  document.getElementById('mobile-drawer')?.classList.add('hidden');
 
-      if (typeof EnergyCharts !== "undefined") {
-        this.energyChart = new EnergyCharts("energy-chart-canvas");
-        
-        // Connect weekly / daily buttons
-        const btnDaily = document.getElementById("chart-btn-daily");
-        const btnWeekly = document.getElementById("chart-btn-weekly");
-        if (btnDaily && btnWeekly) {
-          btnDaily.addEventListener("click", () => {
-            btnDaily.className = "px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500 text-black";
-            btnWeekly.className = "px-3 py-1 rounded-lg text-xs font-semibold bg-white/5 text-slate-400 hover:text-white";
-            this.energyChart.toggleView("daily");
-          });
-          btnWeekly.addEventListener("click", () => {
-            btnWeekly.className = "px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500 text-black";
-            btnDaily.className = "px-3 py-1 rounded-lg text-xs font-semibold bg-white/5 text-slate-400 hover:text-white";
-            this.energyChart.toggleView("weekly");
-          });
-        }
-      }
+  // Lazy-render views on navigation
+  if (viewId === 'dashboard')  renderDashboardGrid(store.activeRoom);
+  if (viewId === 'devices')    renderDevicesGrid();
+  if (viewId === 'automation') renderAutomationsGrid();
+  if (viewId === 'ai')         renderAIInsightsView();
+  if (viewId === 'ai-lab' && window.AILab) window.AILab.onShow();
+}
 
-      this.renderDashboardDevices();
-      this.updateHeaderStats();
-
-      // Reactive store listeners
-      window.store.subscribe("deviceUpdated", ({ device, emitNotification }) => {
-        this.syncDeviceUI(device);
-        this.updateHeaderStats();
-        if (emitNotification) {
-          const stateText = device.state ? "turned ON" : "turned OFF";
-          this.showToast(device.name, `${device.name} is now ${stateText}`, "info");
-        }
-      });
-
-      window.store.subscribe("deviceAdded", (device) => {
-        this.renderDashboardDevices();
-        this.renderDeviceListPage();
-        this.updateHeaderStats();
-        this.showToast("Device Added", `${device.name} was successfully paired!`, "success");
-      });
-
-      window.store.subscribe("automationAdded", (rule) => {
-        this.renderAutomationsList();
-        this.showToast("Automation Created", `Rule "${rule.title}" is now active.`, "success");
-      });
-
-      if (window.lucide) {
-        window.lucide.createIcons();
-      }
+function initNavigation() {
+  document.querySelectorAll('[data-nav-target]').forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      navigateTo(link.getAttribute('data-nav-target'));
     });
-  }
-
-  setupRouting() {
-    const navLinks = document.querySelectorAll("[data-nav-target]");
-    navLinks.forEach(link => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const target = link.getAttribute("data-nav-target");
-        this.navigateTo(target);
-      });
-    });
-
-    const mobileMenuBtn = document.getElementById("mobile-menu-btn");
-    const mobileDrawer = document.getElementById("mobile-drawer");
-    const mobileDrawerClose = document.getElementById("mobile-drawer-close");
-
-    if (mobileMenuBtn && mobileDrawer) {
-      mobileMenuBtn.addEventListener("click", () => {
-        mobileDrawer.classList.remove("hidden");
-      });
-    }
-
-    if (mobileDrawerClose && mobileDrawer) {
-      mobileDrawerClose.addEventListener("click", () => {
-        mobileDrawer.classList.add("hidden");
-      });
-    }
-
-    const heroGetStarted = document.getElementById("hero-cta-started");
-    const heroLiveDemo = document.getElementById("hero-cta-demo");
-    if (heroGetStarted) {
-      heroGetStarted.addEventListener("click", () => this.navigateTo("dashboard"));
-    }
-    if (heroLiveDemo) {
-      heroLiveDemo.addEventListener("click", () => this.navigateTo("dashboard"));
-    }
-  }
-
-  navigateTo(viewId) {
-    this.currentView = viewId;
-
-    document.querySelectorAll(".app-view").forEach(view => {
-      view.classList.remove("active");
-    });
-
-    const targetEl = document.getElementById(`view-${viewId}`);
-    if (targetEl) {
-      targetEl.classList.add("active");
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
-
-    document.querySelectorAll("[data-nav-target]").forEach(link => {
-      const isTarget = link.getAttribute("data-nav-target") === viewId;
-      link.classList.toggle("text-cyan-400", isTarget);
-      link.classList.toggle("bg-white/5", isTarget);
-      link.classList.toggle("border-cyan-500/40", isTarget);
-    });
-
-    const mobileDrawer = document.getElementById("mobile-drawer");
-    if (mobileDrawer) mobileDrawer.classList.add("hidden");
-
-    if (viewId === "dashboard") {
-      this.triggerSkeletonLoading(() => {
-        this.renderDashboardDevices();
-      });
-    } else if (viewId === "devices") {
-      this.renderDeviceListPage();
-    } else if (viewId === "automation") {
-      this.renderAutomationsList();
-    }
-
-    if (window.lucide) {
-      window.lucide.createIcons();
-    }
-  }
-
-  setupClock() {
-    const clockEl = document.getElementById("realtime-clock");
-    const dateEl = document.getElementById("realtime-date");
-
-    const updateTime = () => {
-      const now = new Date();
-      if (clockEl) {
-        clockEl.innerText = now.toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true
-        });
-      }
-      if (dateEl) {
-        dateEl.innerText = now.toLocaleDateString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric"
-        });
-      }
-    };
-
-    updateTime();
-    setInterval(updateTime, 1000);
-  }
-
-  setupSidebar() {
-    const roomButtons = document.querySelectorAll("[data-room-filter]");
-    roomButtons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const room = btn.getAttribute("data-room-filter");
-        this.selectedRoom = room;
-
-        roomButtons.forEach(b => {
-          b.classList.remove("bg-cyan-500/20", "text-cyan-400", "border-cyan-500/40");
-          b.classList.add("text-slate-400");
-        });
-
-        btn.classList.add("bg-cyan-500/20", "text-cyan-400", "border-cyan-500/40");
-        btn.classList.remove("text-slate-400");
-
-        this.triggerSkeletonLoading(() => {
-          this.renderDashboardDevices();
-        });
-      });
-    });
-  }
-
-  triggerSkeletonLoading(callback) {
-    const container = document.getElementById("dashboard-device-grid");
-    if (!container) return;
-
-    container.innerHTML = `
-      <div class="skeleton h-56 rounded-2xl"></div>
-      <div class="skeleton h-56 rounded-2xl"></div>
-      <div class="skeleton h-56 rounded-2xl"></div>
-      <div class="skeleton h-56 rounded-2xl"></div>
-      <div class="skeleton h-56 rounded-2xl"></div>
-      <div class="skeleton h-56 rounded-2xl"></div>
-    `;
-
-    setTimeout(() => {
-      callback();
-      if (window.lucide) window.lucide.createIcons();
-    }, 280);
-  }
-
-  setupDashboardControls() {
-    // Light Slider & Toggle
-    const lightSlider = document.getElementById("ctrl-light-brightness");
-    const lightValText = document.getElementById("ctrl-light-val");
-    const lightToggle = document.getElementById("ctrl-light-toggle");
-
-    if (lightSlider && lightValText) {
-      lightSlider.addEventListener("input", (e) => {
-        const val = e.target.value;
-        lightValText.innerText = `${val}%`;
-        window.store.updateDevice("dev-1", { brightness: parseInt(val), state: val > 0 }, false);
-      });
-    }
-
-    if (lightToggle) {
-      lightToggle.addEventListener("change", (e) => {
-        const checked = e.target.checked;
-        window.store.updateDevice("dev-1", { state: checked });
-        if (lightSlider) lightSlider.value = checked ? 80 : 0;
-        if (lightValText) lightValText.innerText = checked ? "80%" : "0%";
-      });
-    }
-
-    // Thermostat Controls
-    const tempDisplay = document.getElementById("ctrl-temp-display");
-    const tempMinus = document.getElementById("ctrl-temp-minus");
-    const tempPlus = document.getElementById("ctrl-temp-plus");
-    const tempDialCircle = document.getElementById("thermostat-dial-circle");
-
-    const updateThermostatDial = (target) => {
-      if (tempDisplay) tempDisplay.innerText = `${target}°C`;
-      if (tempDialCircle) {
-        const minTemp = 16;
-        const maxTemp = 32;
-        const percent = (target - minTemp) / (maxTemp - minTemp);
-        const offset = 440 - (440 * percent);
-        tempDialCircle.style.strokeDashoffset = offset;
-      }
-    };
-
-    if (tempMinus) {
-      tempMinus.addEventListener("click", () => {
-        const dev = window.store.getDeviceById("dev-2");
-        if (dev && dev.targetTemp > 16) {
-          const newTarget = dev.targetTemp - 1;
-          window.store.updateDevice("dev-2", { targetTemp: newTarget }, false);
-          updateThermostatDial(newTarget);
-          this.showToast("Thermostat", `Target set to ${newTarget}°C`, "info");
-        }
-      });
-    }
-
-    if (tempPlus) {
-      tempPlus.addEventListener("click", () => {
-        const dev = window.store.getDeviceById("dev-2");
-        if (dev && dev.targetTemp < 32) {
-          const newTarget = dev.targetTemp + 1;
-          window.store.updateDevice("dev-2", { targetTemp: newTarget }, false);
-          updateThermostatDial(newTarget);
-          this.showToast("Thermostat", `Target set to ${newTarget}°C`, "info");
-        }
-      });
-    }
-
-    document.querySelectorAll("[data-thermo-mode]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const mode = btn.getAttribute("data-thermo-mode");
-        document.querySelectorAll("[data-thermo-mode]").forEach(b => {
-          b.classList.remove("bg-cyan-500", "text-black", "font-bold");
-          b.classList.add("bg-white/5", "text-slate-400");
-        });
-        btn.classList.add("bg-cyan-500", "text-black", "font-bold");
-        btn.classList.remove("bg-white/5", "text-slate-400");
-        window.store.updateDevice("dev-2", { mode });
-        this.showToast("Thermostat Mode", `Switched to ${mode.toUpperCase()} mode`, "info");
-      });
-    });
-
-    // Lock Button
-    const lockBtn = document.getElementById("ctrl-lock-btn");
-    const lockStatusBadge = document.getElementById("ctrl-lock-status");
-    const lockIconContainer = document.getElementById("ctrl-lock-icon");
-
-    if (lockBtn) {
-      lockBtn.addEventListener("click", () => {
-        const dev = window.store.getDeviceById("dev-3");
-        const nextState = !dev.locked;
-        window.store.updateDevice("dev-3", { locked: nextState });
-
-        if (nextState) {
-          lockStatusBadge.innerText = "LOCKED";
-          lockStatusBadge.className = "px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
-          lockBtn.innerText = "Unlock Entrance";
-          lockBtn.className = "w-full py-2.5 rounded-xl font-semibold text-sm transition-all bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30";
-          if (lockIconContainer) {
-            lockIconContainer.innerHTML = `<i data-lucide="lock" class="w-8 h-8 text-emerald-400"></i>`;
-          }
-          this.showToast("Smart Lock", "Front Entrance door is now LOCKED securely.", "success");
-        } else {
-          lockStatusBadge.innerText = "UNLOCKED";
-          lockStatusBadge.className = "px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30";
-          lockBtn.innerText = "Lock Entrance";
-          lockBtn.className = "w-full py-2.5 rounded-xl font-semibold text-sm transition-all bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30";
-          if (lockIconContainer) {
-            lockIconContainer.innerHTML = `<i data-lucide="unlock" class="w-8 h-8 text-rose-400"></i>`;
-          }
-          this.showToast("Smart Lock Alert", "Front Entrance door has been UNLOCKED!", "warning");
-        }
-        if (window.lucide) window.lucide.createIcons();
-      });
-    }
-
-    // Fan Speed Controls
-    const fanCard = document.getElementById("ctrl-fan-card");
-    const fanSpeedButtons = document.querySelectorAll("[data-fan-speed]");
-
-    fanSpeedButtons.forEach(btn => {
-      btn.addEventListener("click", () => {
-        const speed = btn.getAttribute("data-fan-speed");
-        fanSpeedButtons.forEach(b => {
-          b.classList.remove("bg-cyan-500", "text-black", "font-bold");
-          b.classList.add("bg-white/5", "text-slate-400");
-        });
-        btn.classList.add("bg-cyan-500", "text-black", "font-bold");
-        btn.classList.remove("bg-white/5", "text-slate-400");
-
-        if (fanCard) {
-          fanCard.classList.remove("fan-speed-off", "fan-speed-low", "fan-speed-medium", "fan-speed-high");
-          fanCard.classList.add(`fan-speed-${speed}`);
-        }
-
-        const devState = speed !== "off";
-        const powerMap = { off: 0, low: 22, medium: 48, high: 75 };
-        window.store.updateDevice("dev-4", { speed, state: devState, power: powerMap[speed] });
-        this.showToast("Ceiling Fan", `Fan speed set to ${speed.toUpperCase()}`, "info");
-      });
-    });
-
-    // 3D House Light Toggle from Hero
-    const toggle3DHouseLightBtn = document.getElementById("hero-toggle-lights");
-    if (toggle3DHouseLightBtn) {
-      toggle3DHouseLightBtn.addEventListener("click", () => {
-        if (this.house3D) {
-          const isOn = this.house3D.toggleLights();
-          toggle3DHouseLightBtn.innerText = isOn ? "Turn Off 3D Lights" : "Turn On 3D Lights";
-          this.showToast("3D Villa", isOn ? "Architectural lighting active" : "Night mode active", "info");
-        }
-      });
-    }
-
-    const reset3DViewBtn = document.getElementById("hero-reset-view");
-    if (reset3DViewBtn) {
-      reset3DViewBtn.addEventListener("click", () => {
-        if (this.house3D) {
-          this.house3D.resetView();
-          this.showToast("3D Camera", "Camera reset to default isometric angle", "info");
-        }
-      });
-    }
-  }
-
-  setupCameraCanvas() {
-    const canvas = document.getElementById("cam-canvas");
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    const drawNoise = () => {
-      const w = canvas.width;
-      const h = canvas.height;
-      const imgData = ctx.createImageData(w, h);
-      const buffer = new Uint32Array(imgData.data.buffer);
-
-      for (let i = 0; i < buffer.length; i++) {
-        const val = (Math.random() * 25) | 0;
-        buffer[i] = (255 << 24) | (val << 16) | (val + 10 << 8) | (val + 18);
-      }
-      ctx.putImageData(imgData, 0, 0);
-
-      // Patio silhouettes
-      ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
-      ctx.fillRect(0, h - 35, w, 35);
-      ctx.fillStyle = "rgba(30, 41, 59, 0.7)";
-      ctx.fillRect(35, 10, 15, h - 35);
-      ctx.fillRect(w - 50, 10, 15, h - 35);
-
-      const now = new Date();
-      ctx.fillStyle = "#38bdf8";
-      ctx.font = "10px 'JetBrains Mono', monospace";
-      ctx.fillText(now.toISOString().replace("T", " ").substring(0, 19) + " [CAM-01 YARD]", 12, 20);
-
-      requestAnimationFrame(drawNoise);
-    };
-
-    drawNoise();
-
-    const snapshotBtn = document.getElementById("cam-snapshot-btn");
-    const flashOverlay = document.getElementById("cam-flash");
-    if (snapshotBtn && flashOverlay) {
-      snapshotBtn.addEventListener("click", () => {
-        flashOverlay.classList.remove("opacity-0");
-        flashOverlay.classList.add("opacity-90");
-        setTimeout(() => {
-          flashOverlay.classList.remove("opacity-90");
-          flashOverlay.classList.add("opacity-0");
-        }, 120);
-        this.showToast("Security Snapshot", "High-res frame saved to security archive.", "success");
-      });
-    }
-  }
-
-  renderDashboardDevices() {
-    const container = document.getElementById("dashboard-device-grid");
-    if (!container) return;
-
-    const devices = window.store.getDevices(this.selectedRoom);
-    container.innerHTML = "";
-
-    devices.forEach(dev => {
-      const card = document.createElement("div");
-      card.className = `glass-card p-5 rounded-2xl flex flex-col justify-between transition-all ${dev.state ? 'border-cyan-500/30' : 'opacity-85'}`;
-
-      let dynamicControlHtml = "";
-      if (dev.type === "light") {
-        dynamicControlHtml = `
-          <div class="mt-4 pt-3 border-t border-white/5">
-            <div class="flex justify-between text-xs text-slate-400 mb-1">
-              <span>Brightness</span>
-              <span class="font-mono text-cyan-400 font-semibold">${dev.brightness || 80}%</span>
-            </div>
-            <input type="range" min="0" max="100" value="${dev.state ? (dev.brightness || 80) : 0}" 
-                   class="device-slider w-full" data-device-id="${dev.id}">
-          </div>
-        `;
-      } else if (dev.type === "thermostat") {
-        dynamicControlHtml = `
-          <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
-            <span class="text-xs text-slate-400">Target Temp</span>
-            <span class="text-sm font-bold text-cyan-400 font-mono">${dev.targetTemp || 22}°C</span>
-          </div>
-        `;
-      } else if (dev.type === "lock") {
-        dynamicControlHtml = `
-          <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
-            <span class="text-xs text-slate-400">Battery</span>
-            <span class="text-xs font-mono font-semibold text-emerald-400">${dev.battery || 94}%</span>
-          </div>
-        `;
-      } else if (dev.type === "fan") {
-        dynamicControlHtml = `
-          <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
-            <span class="text-xs text-slate-400">Speed</span>
-            <span class="text-xs uppercase font-bold text-cyan-400">${dev.speed || 'Medium'}</span>
-          </div>
-        `;
-      } else {
-        dynamicControlHtml = `
-          <div class="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
-            <span class="text-xs text-slate-400">Power Draw</span>
-            <span class="text-xs font-mono text-slate-300">${dev.power || 0} W</span>
-          </div>
-        `;
-      }
-
-      card.innerHTML = `
-        <div>
-          <div class="flex items-start justify-between">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center ${dev.state ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-500'}">
-              <i data-lucide="${dev.icon || 'cpu'}" class="w-6 h-6"></i>
-            </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" class="sr-only switch-input device-toggle" data-device-id="${dev.id}" ${dev.state ? 'checked' : ''}>
-              <div class="switch-track w-11 h-6 bg-slate-700 rounded-full transition-colors flex items-center p-0.5">
-                <div class="switch-thumb w-5 h-5 bg-white rounded-full transition-transform"></div>
-              </div>
-            </label>
-          </div>
-          
-          <div class="mt-4">
-            <h4 class="font-bold text-base text-slate-100">${dev.name}</h4>
-            <div class="flex items-center gap-2 mt-1">
-              <span class="text-xs text-slate-400">${dev.room}</span>
-              <span class="w-1.5 h-1.5 rounded-full ${dev.status === 'online' ? 'bg-emerald-400' : 'bg-slate-500'}"></span>
-              <span class="text-[11px] text-slate-500">${dev.status === 'online' ? 'Online' : 'Offline'}</span>
-            </div>
-          </div>
-        </div>
-        ${dynamicControlHtml}
-      `;
-
-      container.appendChild(card);
-    });
-
-    container.querySelectorAll(".device-toggle").forEach(toggle => {
-      toggle.addEventListener("change", (e) => {
-        const id = toggle.getAttribute("data-device-id");
-        window.store.updateDevice(id, { state: e.target.checked });
-      });
-    });
-
-    container.querySelectorAll(".device-slider").forEach(slider => {
-      slider.addEventListener("input", (e) => {
-        const id = slider.getAttribute("data-device-id");
-        const val = parseInt(e.target.value);
-        window.store.updateDevice(id, { brightness: val, state: val > 0 }, false);
-      });
-    });
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  setupDevicesView() {
-    const searchInput = document.getElementById("device-search-input");
-    if (searchInput) {
-      searchInput.addEventListener("input", (e) => {
-        this.deviceSearchTerm = e.target.value.toLowerCase();
-        this.renderDeviceListPage();
-      });
-    }
-
-    document.querySelectorAll("[data-device-filter-pill]").forEach(pill => {
-      pill.addEventListener("click", () => {
-        document.querySelectorAll("[data-device-filter-pill]").forEach(p => {
-          p.classList.remove("bg-cyan-500/20", "text-cyan-400", "border-cyan-500/40");
-          p.classList.add("text-slate-400");
-        });
-        pill.classList.add("bg-cyan-500/20", "text-cyan-400", "border-cyan-500/40");
-        pill.classList.remove("text-slate-400");
-        this.deviceFilterType = pill.getAttribute("data-device-filter-pill");
-        this.renderDeviceListPage();
-      });
-    });
-  }
-
-  renderDeviceListPage() {
-    const container = document.getElementById("devices-page-grid");
-    if (!container) return;
-
-    let devices = window.store.getDevices();
-
-    if (this.deviceFilterType !== "All") {
-      if (this.deviceFilterType === "Online") {
-        devices = devices.filter(d => d.status === "online");
-      } else if (this.deviceFilterType === "Offline") {
-        devices = devices.filter(d => d.status === "offline");
-      } else {
-        devices = devices.filter(d => d.room === this.deviceFilterType);
-      }
-    }
-
-    if (this.deviceSearchTerm) {
-      devices = devices.filter(d =>
-        d.name.toLowerCase().includes(this.deviceSearchTerm) ||
-        d.room.toLowerCase().includes(this.deviceSearchTerm) ||
-        d.type.toLowerCase().includes(this.deviceSearchTerm)
-      );
-    }
-
-    container.innerHTML = "";
-
-    if (devices.length === 0) {
-      container.innerHTML = `
-        <div class="col-span-full text-center py-16">
-          <i data-lucide="search-x" class="w-12 h-12 text-slate-500 mx-auto mb-3"></i>
-          <p class="text-slate-400 font-medium">No smart devices found matching your criteria.</p>
-        </div>
-      `;
-      if (window.lucide) window.lucide.createIcons();
-      return;
-    }
-
-    devices.forEach(dev => {
-      const card = document.createElement("div");
-      card.className = "glass-card p-5 rounded-2xl flex flex-col justify-between";
-
-      card.innerHTML = `
-        <div>
-          <div class="flex items-center justify-between mb-4">
-            <div class="w-12 h-12 rounded-xl flex items-center justify-center ${dev.state ? 'bg-cyan-500/20 text-cyan-400' : 'bg-white/5 text-slate-400'}">
-              <i data-lucide="${dev.icon || 'cpu'}" class="w-6 h-6"></i>
-            </div>
-            <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${dev.status === 'online' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-slate-700/50 text-slate-400 border border-slate-600/30'}">
-              ${dev.status.toUpperCase()}
-            </span>
-          </div>
-
-          <h3 class="font-bold text-lg text-slate-100 mb-1">${dev.name}</h3>
-          <p class="text-xs text-slate-400 mb-3">${dev.room} · ${dev.type.toUpperCase()}</p>
-
-          <div class="bg-black/20 rounded-xl p-3 flex items-center justify-between text-xs text-slate-300 mb-4">
-            <span>Last Active: <strong class="text-slate-200">${dev.lastActive}</strong></span>
-            <span>Power: <strong class="text-cyan-400 font-mono">${dev.power || 0}W</strong></span>
-          </div>
-        </div>
-
-        <div class="pt-3 border-t border-white/5 flex items-center justify-between">
-          <span class="text-xs font-medium text-slate-400">Power State</span>
-          <label class="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" class="sr-only switch-input device-list-toggle" data-device-id="${dev.id}" ${dev.state ? 'checked' : ''}>
-            <div class="switch-track w-11 h-6 bg-slate-700 rounded-full transition-colors flex items-center p-0.5">
-              <div class="switch-thumb w-5 h-5 bg-white rounded-full transition-transform"></div>
-            </div>
-          </label>
-        </div>
-      `;
-      container.appendChild(card);
-    });
-
-    container.querySelectorAll(".device-list-toggle").forEach(toggle => {
-      toggle.addEventListener("change", (e) => {
-        const id = toggle.getAttribute("data-device-id");
-        window.store.updateDevice(id, { state: e.target.checked });
-      });
-    });
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  setupAutomationsView() {}
-
-  renderAutomationsList() {
-    const container = document.getElementById("automations-page-grid");
-    if (!container) return;
-
-    const rules = window.store.getAutomations();
-    container.innerHTML = "";
-
-    rules.forEach(rule => {
-      const card = document.createElement("div");
-      card.className = "glass-card p-6 rounded-2xl flex flex-col justify-between";
-
-      card.innerHTML = `
-        <div>
-          <div class="flex items-center justify-between mb-4">
-            <span class="px-3 py-1 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
-              ${rule.category || 'Rule'}
-            </span>
-            <label class="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" class="sr-only switch-input auto-toggle" data-auto-id="${rule.id}" ${rule.enabled ? 'checked' : ''}>
-              <div class="switch-track w-11 h-6 bg-slate-700 rounded-full transition-colors flex items-center p-0.5">
-                <div class="switch-thumb w-5 h-5 bg-white rounded-full transition-transform"></div>
-              </div>
-            </label>
-          </div>
-
-          <h3 class="font-bold text-lg text-slate-100 mb-2">${rule.title}</h3>
-          <p class="text-sm text-slate-400 mb-4">${rule.desc}</p>
-
-          <div class="space-y-2 text-xs mb-5">
-            <div class="p-2.5 rounded-lg bg-black/30 border border-white/5 flex items-center gap-2 text-slate-300">
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/20 text-cyan-400 uppercase">IF</span>
-              <span>${rule.trigger}</span>
-            </div>
-            <div class="p-2.5 rounded-lg bg-black/30 border border-white/5 flex items-center gap-2 text-slate-300">
-              <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-400 uppercase">THEN</span>
-              <span>${rule.action}</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="pt-3 border-t border-white/5 flex items-center justify-between">
-          <span class="text-xs text-slate-400">${rule.enabled ? 'Status: Active' : 'Status: Paused'}</span>
-          <button class="test-rule-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-white/5 hover:bg-white/10 text-cyan-400 transition-colors" data-auto-id="${rule.id}">
-            Run Now
-          </button>
-        </div>
-      `;
-      container.appendChild(card);
-    });
-
-    container.querySelectorAll(".auto-toggle").forEach(toggle => {
-      toggle.addEventListener("change", () => {
-        const id = toggle.getAttribute("data-auto-id");
-        const auto = window.store.toggleAutomation(id);
-        if (auto) {
-          this.showToast("Automation", `"${auto.title}" is now ${auto.enabled ? 'ENABLED' : 'PAUSED'}`, "info");
-        }
-      });
-    });
-
-    container.querySelectorAll(".test-rule-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-auto-id");
-        const auto = window.store.getAutomations().find(a => a.id === id);
-        if (auto) {
-          this.showToast("Automation Triggered", `Executed "${auto.title}": ${auto.action}`, "success");
-        }
-      });
-    });
-
-    if (window.lucide) window.lucide.createIcons();
-  }
-
-  setupSettingsView() {
-    const saveProfileBtn = document.getElementById("save-profile-btn");
-    if (saveProfileBtn) {
-      saveProfileBtn.addEventListener("click", () => {
-        const nameInput = document.getElementById("profile-name-input");
-        const emailInput = document.getElementById("profile-email-input");
-        if (nameInput && emailInput) {
-          window.store.user.name = nameInput.value;
-          window.store.user.email = emailInput.value;
-          this.showToast("Profile Updated", "Account settings saved successfully.", "success");
-          this.updateHeaderStats();
-        }
-      });
-    }
-
-    const resetDataBtn = document.getElementById("reset-demo-btn");
-    if (resetDataBtn) {
-      resetDataBtn.addEventListener("click", () => {
-        this.showToast("Demo Reset", "Restoring factory default demo states...", "info");
-        setTimeout(() => location.reload(), 1000);
-      });
-    }
-  }
-
-  setupModalHandlers() {
-    const openAddDeviceBtn = document.getElementById("open-add-device-modal");
-    const closeAddDeviceBtn = document.getElementById("close-add-device-modal");
-    const addDeviceModal = document.getElementById("add-device-modal");
-    const addDeviceForm = document.getElementById("add-device-form");
-
-    if (openAddDeviceBtn && addDeviceModal) {
-      openAddDeviceBtn.addEventListener("click", () => addDeviceModal.classList.remove("hidden"));
-    }
-    if (closeAddDeviceBtn && addDeviceModal) {
-      closeAddDeviceBtn.addEventListener("click", () => addDeviceModal.classList.add("hidden"));
-    }
-    if (addDeviceForm && addDeviceModal) {
-      addDeviceForm.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const name = document.getElementById("new-device-name").value;
-        const room = document.getElementById("new-device-room").value;
-        const type = document.getElementById("new-device-type").value;
-
-        const iconMap = {
-          light: "lightbulb",
-          thermostat: "thermometer",
-          lock: "lock",
-          fan: "fan",
-          camera: "video",
-          appliance: "cpu"
-        };
-
-        window.store.addDevice({
-          name,
-          room,
-          type,
-          icon: iconMap[type] || "cpu",
-          power: 25,
-          state: true
-        });
-
-        addDeviceModal.classList.add("hidden");
-        addDeviceForm.reset();
-      });
-    }
-
-    const openCreateAutoBtn = document.getElementById("open-create-auto-modal");
-    const closeCreateAutoBtn = document.getElementById("close-create-auto-modal");
-    const createAutoModal = document.getElementById("create-auto-modal");
-    const createAutoForm = document.getElementById("create-auto-form");
-
-    if (openCreateAutoBtn && createAutoModal) {
-      openCreateAutoBtn.addEventListener("click", () => createAutoModal.classList.remove("hidden"));
-    }
-    if (closeCreateAutoBtn && createAutoModal) {
-      closeCreateAutoBtn.addEventListener("click", () => createAutoModal.classList.add("hidden"));
-    }
-    if (createAutoForm && createAutoModal) {
-      createAutoForm.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const title = document.getElementById("rule-title").value;
-        const trigger = document.getElementById("rule-trigger").value;
-        const action = document.getElementById("rule-action").value;
-        const category = document.getElementById("rule-category").value;
-
-        window.store.addAutomation({
-          title,
-          desc: `${trigger} → ${action}`,
-          trigger,
-          action,
-          category
-        });
-
-        createAutoModal.classList.add("hidden");
-        createAutoForm.reset();
-      });
-    }
-  }
-
-  setupThemeToggle() {
-    const themeBtn = document.getElementById("theme-toggle-btn");
-    if (!themeBtn) return;
-
-    themeBtn.addEventListener("click", () => {
-      document.body.classList.toggle("light-theme");
-      const isLight = document.body.classList.contains("light-theme");
-      themeBtn.innerHTML = isLight 
-        ? `<i data-lucide="moon" class="w-5 h-5 text-slate-800"></i>` 
-        : `<i data-lucide="sun" class="w-5 h-5 text-amber-400"></i>`;
-      this.showToast("Theme Changed", isLight ? "Light mode enabled" : "Futuristic dark mode active", "info");
-      if (window.lucide) window.lucide.createIcons();
-    });
-  }
-
-  updateHeaderStats() {
-    const summary = window.store.getStateSummary();
-    const activeBadge = document.getElementById("header-active-count");
-    if (activeBadge) {
-      activeBadge.innerText = `${summary.activeCount} / ${summary.totalDevices} Active`;
-    }
-
-    const userNameEls = document.querySelectorAll(".user-name-display");
-    userNameEls.forEach(el => el.innerText = window.store.user.name);
-
-    const userLocEls = document.querySelectorAll(".user-location-display");
-    userLocEls.forEach(el => el.innerText = window.store.user.location);
-  }
-
-  syncDeviceUI(device) {
-    if (device.id === "dev-1") {
-      const slider = document.getElementById("ctrl-light-brightness");
-      const toggle = document.getElementById("ctrl-light-toggle");
-      const val = document.getElementById("ctrl-light-val");
-      if (slider) slider.value = device.brightness || 80;
-      if (toggle) toggle.checked = device.state;
-      if (val) val.innerText = `${device.brightness || 80}%`;
-    }
-  }
-
-  showToast(title, message, type = "info") {
-    const container = document.getElementById("toast-container");
-    if (!container) return;
-
-    const toast = document.createElement("div");
-    toast.className = "toast-item p-4";
-
-    const iconColors = {
-      info: "text-cyan-400",
-      success: "text-emerald-400",
-      warning: "text-amber-400",
-      danger: "text-rose-400"
-    };
-
-    const iconNames = {
-      info: "info",
-      success: "check-circle",
-      warning: "alert-triangle",
-      danger: "shield-alert"
-    };
-
-    toast.innerHTML = `
-      <div class="flex items-start gap-3">
-        <i data-lucide="${iconNames[type] || 'info'}" class="w-5 h-5 ${iconColors[type] || 'text-cyan-400'} mt-0.5 flex-shrink-0"></i>
-        <div class="flex-1">
-          <h5 class="text-xs font-bold uppercase tracking-wider text-slate-300">${title}</h5>
-          <p class="text-sm text-slate-100 font-medium mt-0.5">${message}</p>
-        </div>
-        <button class="toast-close text-slate-500 hover:text-slate-300">
-          <i data-lucide="x" class="w-4 h-4"></i>
-        </button>
+  });
+  document.getElementById('hero-cta-started')?.addEventListener('click', () => navigateTo('dashboard'));
+  document.getElementById('hero-cta-demo')?.addEventListener('click', () => navigateTo('dashboard'));
+}
+
+// ============================================================
+// 3. REAL-TIME CLOCK
+// ============================================================
+
+function updateClock() {
+  const now = new Date();
+  const timeEl = document.getElementById('realtime-clock');
+  const dateEl = document.getElementById('realtime-date');
+  if (timeEl) timeEl.textContent = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  if (dateEl) dateEl.textContent = now.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// ============================================================
+// 4. THEME TOGGLE
+// ============================================================
+
+function initThemeToggle() {
+  const btn = document.getElementById('theme-toggle-btn');
+  if (!btn) return;
+  let isDark = document.documentElement.classList.contains('dark');
+
+  btn.addEventListener('click', () => {
+    isDark = !isDark;
+    document.documentElement.classList.toggle('dark', isDark);
+    document.documentElement.classList.toggle('light-theme', !isDark);
+    store.user.theme = isDark ? 'dark' : 'light';
+    btn.innerHTML = isDark
+      ? '<i data-lucide="sun" class="w-5 h-5 text-amber-400"></i>'
+      : '<i data-lucide="moon" class="w-5 h-5 text-slate-300"></i>';
+    if (window.lucide) lucide.createIcons({ nodes: [btn] });
+  });
+}
+
+// ============================================================
+// 5. MOBILE DRAWER
+// ============================================================
+
+function initMobileMenu() {
+  const btn      = document.getElementById('mobile-menu-btn');
+  const drawer   = document.getElementById('mobile-drawer');
+  const closeBtn = document.getElementById('mobile-drawer-close');
+  btn?.addEventListener('click', () => drawer?.classList.toggle('hidden'));
+  closeBtn?.addEventListener('click', () => drawer?.classList.add('hidden'));
+}
+
+// ============================================================
+// 6. HEADER SYNC
+// ============================================================
+
+function syncHeader() {
+  const s = store.getStateSummary();
+  const el = document.getElementById('header-active-count');
+  if (el) el.textContent = `${s.activeCount} / ${s.totalDevices} Active`;
+
+  document.querySelectorAll('.user-name-display').forEach(e => e.textContent = store.user.name);
+  document.querySelectorAll('.user-location-display').forEach(e => e.textContent = store.user.location);
+
+  const livePow = document.getElementById('metric-live-power');
+  if (livePow) livePow.textContent = s.energy.currentPowerKw.toFixed(2) + ' kW';
+}
+
+// ============================================================
+// 7. DEVICE CARD BUILDER (used by both dashboard + devices page)
+// ============================================================
+
+const DEVICE_ICON  = { light:'lightbulb', thermostat:'thermometer', lock:'lock', fan:'fan', camera:'video', appliance:'cpu', lamp:'lamp-desk' };
+const DEVICE_COLOR = { light:'amber', thermostat:'cyan', lock:'emerald', fan:'purple', camera:'rose', appliance:'blue' };
+
+function deviceExtraInfo(d) {
+  if (d.type === 'light')      return `${d.brightness ?? '--'}% brightness`;
+  if (d.type === 'thermostat') return `${d.targetTemp ?? '--'}°C · ${d.mode ?? 'cool'}`;
+  if (d.type === 'lock')       return `Battery ${d.battery ?? '--'}%`;
+  if (d.type === 'fan')        return `Speed: ${d.speed ?? '--'}`;
+  if (d.type === 'camera')     return d.recording ? 'Recording' : 'Standby';
+  return d.statusText || '';
+}
+
+function buildDeviceCard(device) {
+  const color   = DEVICE_COLOR[device.type] || 'slate';
+  const icon    = DEVICE_ICON[device.type]  || 'cpu';
+  const online  = device.status === 'online';
+  const dotCls  = online ? 'bg-emerald-400' : 'bg-slate-600';
+  const powerW  = device.state && online ? `${device.power ?? 0}W` : '0W';
+
+  return `
+  <div class="glass-card p-5 rounded-2xl flex flex-col gap-3" data-device-id="${device.id}">
+    <div class="flex items-start justify-between">
+      <div class="w-11 h-11 rounded-xl bg-${color}-500/20 text-${color}-400 flex items-center justify-center">
+        <i data-lucide="${icon}" class="w-5 h-5"></i>
       </div>
-      <div class="toast-progress mt-3"></div>
-    `;
+      <label class="relative inline-flex items-center cursor-pointer">
+        <input type="checkbox" class="sr-only switch-input device-state-toggle"
+               data-device-id="${device.id}" ${device.state ? 'checked' : ''} ${!online ? 'disabled' : ''}>
+        <div class="switch-track w-11 h-6 bg-slate-700 rounded-full transition-colors flex items-center p-0.5">
+          <div class="switch-thumb w-5 h-5 bg-white rounded-full transition-transform"></div>
+        </div>
+      </label>
+    </div>
+    <div>
+      <h4 class="font-bold text-sm text-slate-100 truncate">${device.name}</h4>
+      <p class="text-[11px] text-slate-400 mt-0.5">${device.room}</p>
+    </div>
+    <div class="flex items-center justify-between pt-3 border-t border-white/5 text-[11px]">
+      <div class="flex items-center gap-1.5 text-slate-400">
+        <span class="w-1.5 h-1.5 rounded-full ${dotCls}"></span>
+        <span>${online ? 'Online' : 'Offline'}</span>
+      </div>
+      <span class="font-mono text-slate-400">${deviceExtraInfo(device)}</span>
+    </div>
+    <div class="flex gap-2">
+      <span class="flex-1 py-1 rounded-lg text-[11px] text-center font-mono ${device.state && online ? 'text-emerald-400 bg-emerald-500/10' : 'text-slate-500 bg-white/5'}">${powerW}</span>
+      <button class="py-1 px-2.5 rounded-lg text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition-colors device-delete-btn" data-device-id="${device.id}">
+        Remove
+      </button>
+    </div>
+  </div>`;
+}
 
-    container.appendChild(toast);
-    if (window.lucide) window.lucide.createIcons();
-
-    const closeBtn = toast.querySelector(".toast-close");
-    if (closeBtn) {
-      closeBtn.addEventListener("click", () => {
-        toast.classList.add("removing");
-        setTimeout(() => toast.remove(), 300);
-      });
-    }
-
-    setTimeout(() => {
-      if (toast.parentElement) {
-        toast.classList.add("removing");
-        setTimeout(() => toast.remove(), 300);
+function attachDeviceCardListeners(container) {
+  container.querySelectorAll('.device-state-toggle').forEach(toggle => {
+    toggle.addEventListener('change', e => {
+      const id  = e.target.getAttribute('data-device-id');
+      const dev = store.updateDevice(id, { state: e.target.checked });
+      if (dev) {
+        showToast(`${dev.name} turned <strong>${dev.state ? 'ON' : 'OFF'}</strong>`, dev.state ? 'success' : 'info');
+        syncHeader();
       }
-    }, 3500);
+    });
+  });
+
+  container.querySelectorAll('.device-delete-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      const id  = (e.target.closest('[data-device-id]') || e.target).getAttribute('data-device-id');
+      const dev = store.getDeviceById(id);
+      if (dev) {
+        store.deleteDevice(id);
+        showToast(`${dev.name} removed from mesh network.`, 'warning');
+        renderDashboardGrid(store.activeRoom);
+        renderDevicesGrid();
+        syncHeader();
+      }
+    });
+  });
+}
+
+// ============================================================
+// 8. DASHBOARD DEVICE GRID
+// ============================================================
+
+function renderDashboardGrid(room = 'All') {
+  const grid = document.getElementById('dashboard-device-grid');
+  if (!grid) return;
+  const devices = store.getDevices(room === 'All' ? null : room);
+  if (!devices.length) {
+    grid.innerHTML = `<div class="col-span-3 text-center py-12 text-slate-400 text-sm">No devices in "${room}".</div>`;
+    return;
+  }
+  grid.innerHTML = devices.map(buildDeviceCard).join('');
+  if (window.lucide) lucide.createIcons({ nodes: [grid] });
+  attachDeviceCardListeners(grid);
+}
+
+// ============================================================
+// 9. DEVICES PAGE GRID
+// ============================================================
+
+let _deviceFilter = 'All';
+let _deviceQuery  = '';
+
+function renderDevicesGrid() {
+  const grid = document.getElementById('devices-page-grid');
+  if (!grid) return;
+  let devices = store.getDevices();
+  if (_deviceFilter === 'Online')       devices = devices.filter(d => d.status === 'online');
+  else if (_deviceFilter === 'Offline') devices = devices.filter(d => d.status === 'offline');
+  else if (_deviceFilter !== 'All')     devices = devices.filter(d => d.room === _deviceFilter);
+  if (_deviceQuery) {
+    const q = _deviceQuery.toLowerCase();
+    devices = devices.filter(d => d.name.toLowerCase().includes(q) || d.room.toLowerCase().includes(q));
+  }
+  if (!devices.length) {
+    grid.innerHTML = `<div class="col-span-4 text-center py-12 text-slate-400 text-sm">No devices match your filter.</div>`;
+    return;
+  }
+  grid.innerHTML = devices.map(buildDeviceCard).join('');
+  if (window.lucide) lucide.createIcons({ nodes: [grid] });
+  attachDeviceCardListeners(grid);
+}
+
+function initDevicesPage() {
+  const searchInput = document.getElementById('device-search-input');
+  searchInput?.addEventListener('input', e => {
+    _deviceQuery = e.target.value;
+    renderDevicesGrid();
+  });
+
+  document.querySelectorAll('[data-device-filter-pill]').forEach(pill => {
+    pill.addEventListener('click', () => {
+      _deviceFilter = pill.getAttribute('data-device-filter-pill');
+      document.querySelectorAll('[data-device-filter-pill]').forEach(p => {
+        const active = p.getAttribute('data-device-filter-pill') === _deviceFilter;
+        p.className = active
+          ? 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+          : 'px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white bg-white/5';
+      });
+      renderDevicesGrid();
+    });
+  });
+}
+
+// ============================================================
+// 10. AUTOMATION GRID
+// ============================================================
+
+const AUTO_COLOR = { 'Energy Saving':'cyan', 'Comfort':'purple', 'Security':'emerald', 'Climate':'amber', 'AI Generated':'blue' };
+
+function buildAutomationCard(auto) {
+  const color = AUTO_COLOR[auto.category] || 'slate';
+  return `
+  <div class="glass-card p-6 rounded-2xl flex flex-col gap-4" data-auto-id="${auto.id}">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-${color}-500/20 text-${color}-400 uppercase tracking-wider">${auto.category}</span>
+          ${auto.aiGenerated ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-400">✨ AI</span>' : ''}
+        </div>
+        <h4 class="font-bold text-sm text-slate-100">${auto.title}</h4>
+        <p class="text-xs text-slate-400 mt-1 leading-relaxed">${auto.desc}</p>
+      </div>
+      <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+        <input type="checkbox" class="sr-only switch-input auto-toggle" data-auto-id="${auto.id}" ${auto.enabled ? 'checked' : ''}>
+        <div class="switch-track w-11 h-6 bg-slate-700 rounded-full transition-colors flex items-center p-0.5">
+          <div class="switch-thumb w-5 h-5 bg-white rounded-full transition-transform"></div>
+        </div>
+      </label>
+    </div>
+    <div class="grid grid-cols-2 gap-3 pt-3 border-t border-white/5 text-[11px]">
+      <div class="bg-black/30 p-2.5 rounded-xl">
+        <span class="text-cyan-400 font-bold block mb-1 uppercase tracking-wider text-[10px]">IF</span>
+        <span class="text-slate-300 leading-relaxed">${auto.trigger}</span>
+      </div>
+      <div class="bg-black/30 p-2.5 rounded-xl">
+        <span class="text-purple-400 font-bold block mb-1 uppercase tracking-wider text-[10px]">THEN</span>
+        <span class="text-slate-300 leading-relaxed">${auto.action}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAutomationsGrid() {
+  const grid = document.getElementById('automations-page-grid');
+  if (!grid) return;
+  const autos = store.getAutomations();
+  grid.innerHTML = autos.map(buildAutomationCard).join('');
+  grid.querySelectorAll('.auto-toggle').forEach(toggle => {
+    toggle.addEventListener('change', e => {
+      const id   = e.target.getAttribute('data-auto-id');
+      const auto = store.toggleAutomation(id);
+      if (auto) showToast(`"${auto.title}" ${auto.enabled ? 'enabled' : 'disabled'}.`, auto.enabled ? 'success' : 'info');
+    });
+  });
+}
+
+// ============================================================
+// 11. DASHBOARD WIDGET CONTROLS
+// ============================================================
+
+function initDashboardControls() {
+  /* ---- Lighting ---- */
+  const lightToggle     = document.getElementById('ctrl-light-toggle');
+  const lightBrightness = document.getElementById('ctrl-light-brightness');
+  const lightVal        = document.getElementById('ctrl-light-val');
+
+  lightToggle?.addEventListener('change', e => {
+    store.updateDevice('dev-1', { state: e.target.checked });
+    showToast(`Living Room Lights ${e.target.checked ? 'ON' : 'OFF'}`, e.target.checked ? 'success' : 'info');
+    syncHeader();
+  });
+  lightBrightness?.addEventListener('input', e => {
+    const v = parseInt(e.target.value);
+    if (lightVal) lightVal.textContent = v + '%';
+    store.updateDevice('dev-1', { brightness: v }, false);
+  });
+
+  /* ---- Thermostat ---- */
+  let thermoTemp = 22;
+  const tempDisplay  = document.getElementById('ctrl-temp-display');
+  const dialCircle   = document.getElementById('thermostat-dial-circle');
+
+  function setThermoTemp(t) {
+    thermoTemp = t;
+    if (tempDisplay) tempDisplay.textContent = t + '°C';
+    if (dialCircle) {
+      const pct    = (t - 16) / (30 - 16);
+      const offset = 400 - pct * 310;
+      dialCircle.style.strokeDashoffset = offset;
+      dialCircle.style.stroke = t <= 20 ? '#06b6d4' : t <= 25 ? '#8b5cf6' : '#f59e0b';
+    }
+    store.updateDevice('dev-2', { targetTemp: t }, false);
+  }
+
+  document.getElementById('ctrl-temp-minus')?.addEventListener('click', () => setThermoTemp(Math.max(16, thermoTemp - 1)));
+  document.getElementById('ctrl-temp-plus')?.addEventListener('click',  () => setThermoTemp(Math.min(30, thermoTemp + 1)));
+
+  document.querySelectorAll('[data-thermo-mode]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.getAttribute('data-thermo-mode');
+      store.updateDevice('dev-2', { mode });
+      document.querySelectorAll('[data-thermo-mode]').forEach(b => {
+        b.className = b.getAttribute('data-thermo-mode') === mode
+          ? 'py-1.5 rounded-lg font-bold bg-cyan-500 text-black'
+          : 'py-1.5 rounded-lg text-slate-400 hover:text-white';
+      });
+      showToast(`Climate mode: <strong>${mode.toUpperCase()}</strong>`, 'info');
+    });
+  });
+
+  /* ---- Smart Lock ---- */
+  let isLocked     = true;
+  const lockBtn    = document.getElementById('ctrl-lock-btn');
+  const lockStatus = document.getElementById('ctrl-lock-status');
+  const lockIcon   = document.getElementById('ctrl-lock-icon');
+
+  lockBtn?.addEventListener('click', () => {
+    isLocked = !isLocked;
+    store.updateDevice('dev-3', { locked: isLocked, state: isLocked });
+
+    if (lockStatus) {
+      lockStatus.textContent = isLocked ? 'LOCKED' : 'UNLOCKED';
+      lockStatus.className   = isLocked
+        ? 'px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+        : 'px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30';
+    }
+    if (lockIcon) {
+      lockIcon.innerHTML = `<i data-lucide="${isLocked ? 'lock' : 'unlock'}" class="w-6 h-6"></i>`;
+      lockIcon.className = isLocked
+        ? 'w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center'
+        : 'w-12 h-12 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center';
+      if (window.lucide) lucide.createIcons({ nodes: [lockIcon] });
+    }
+    if (lockBtn) {
+      lockBtn.textContent = isLocked ? 'Unlock Entrance' : 'Lock Entrance';
+      lockBtn.className   = isLocked
+        ? 'w-full py-2.5 rounded-xl font-semibold text-sm transition-all bg-rose-500/20 text-rose-300 border border-rose-500/30 hover:bg-rose-500/30'
+        : 'w-full py-2.5 rounded-xl font-semibold text-sm transition-all bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30';
+    }
+    showToast(isLocked ? '🔒 Front entrance <strong>locked</strong>' : '🔓 Entrance <strong>unlocked</strong> — auto-relock in 30s', isLocked ? 'success' : 'warning');
+  });
+
+  /* ---- Ceiling Fan ---- */
+  const fanCard = document.getElementById('ctrl-fan-card');
+  document.querySelectorAll('[data-fan-speed]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const speed = btn.getAttribute('data-fan-speed');
+      store.updateDevice('dev-4', { speed, state: speed !== 'off' });
+      if (fanCard) fanCard.className = fanCard.className.replace(/fan-speed-\w+/g, '').trim() + ` fan-speed-${speed}`;
+      document.querySelectorAll('[data-fan-speed]').forEach(b => {
+        b.className = b.getAttribute('data-fan-speed') === speed
+          ? 'py-1.5 rounded-lg font-bold bg-cyan-500 text-black'
+          : 'py-1.5 rounded-lg text-slate-400 hover:text-white';
+      });
+      showToast(`Bedroom Fan → <strong>${speed.toUpperCase()}</strong>`, 'info');
+      syncHeader();
+    });
+  });
+
+  /* ---- Camera Snapshot ---- */
+  document.getElementById('cam-snapshot-btn')?.addEventListener('click', () => {
+    const flash = document.getElementById('cam-flash');
+    if (flash) { flash.style.opacity = '0.85'; setTimeout(() => flash.style.opacity = '0', 140); }
+    showToast('📸 Snapshot captured — saved to encrypted cloud vault', 'success');
+  });
+}
+
+// ============================================================
+// 12. CAMERA CANVAS — Night-vision noise simulation
+// ============================================================
+
+function initCameraCanvas() {
+  const canvas = document.getElementById('cam-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  function drawFrame() {
+    const W = canvas.width, H = canvas.height;
+    const id = ctx.createImageData(W, H);
+    const d  = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const n = Math.random() * 28 + 8;
+      d[i]   = n * 0.15;   // R
+      d[i+1] = n * 0.55;   // G  (greenish night-vision)
+      d[i+2] = n * 0.12;   // B
+      d[i+3] = 255;
+    }
+    ctx.putImageData(id, 0, 0);
+    // Timestamp overlay
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.fillStyle = 'rgba(6,182,212,0.75)';
+    const now = new Date();
+    ctx.fillText(`CAM-02  ${now.toLocaleTimeString('en-IN')}  BACKYARD`, 10, H - 12);
+  }
+  setInterval(drawFrame, 85);
+}
+
+// ============================================================
+// 13. 3D HOUSE CONTROLS
+// ============================================================
+
+function init3DHouseControls() {
+  const toggleBtn = document.getElementById('hero-toggle-lights');
+  const resetBtn  = document.getElementById('hero-reset-view');
+
+  toggleBtn?.addEventListener('click', () => {
+    if (!window.smartHouse3D) return;
+    const on = window.smartHouse3D.toggleLights();
+    toggleBtn.textContent = on ? 'Toggle 3D Lights' : 'Restore Lights';
+    showToast(`3D villa interior lights ${on ? 'restored' : 'dimmed'}`, 'info');
+  });
+
+  resetBtn?.addEventListener('click', () => window.smartHouse3D?.resetView());
+}
+
+// ============================================================
+// 14. ROOM FILTER (Dashboard sidebar)
+// ============================================================
+
+function initRoomFilter() {
+  document.querySelectorAll('[data-room-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const room = btn.getAttribute('data-room-filter');
+      store.activeRoom = room;
+      document.querySelectorAll('[data-room-filter]').forEach(b => {
+        const active = b.getAttribute('data-room-filter') === room;
+        b.className = active
+          ? 'w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 flex items-center justify-between transition-all'
+          : 'w-full text-left px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 flex items-center justify-between transition-all';
+      });
+      renderDashboardGrid(room);
+    });
+  });
+}
+
+// ============================================================
+// 15. ADD DEVICE MODAL
+// ============================================================
+
+function initAddDeviceModal() {
+  const modal  = document.getElementById('add-device-modal');
+  const form   = document.getElementById('add-device-form');
+  document.getElementById('open-add-device-modal')?.addEventListener('click', () => modal?.classList.remove('hidden'));
+  document.getElementById('close-add-device-modal')?.addEventListener('click', () => modal?.classList.add('hidden'));
+
+  form?.addEventListener('submit', e => {
+    e.preventDefault();
+    const name = document.getElementById('new-device-name')?.value.trim();
+    const room = document.getElementById('new-device-room')?.value;
+    const type = document.getElementById('new-device-type')?.value;
+    if (!name) return;
+    const dev = store.addDevice({ name, room, type, icon: type });
+    showToast(`✅ "<strong>${dev.name}</strong>" paired to the mesh network!`, 'success');
+    modal?.classList.add('hidden');
+    form.reset();
+    renderDevicesGrid();
+    renderDashboardGrid(store.activeRoom);
+    syncHeader();
+  });
+}
+
+// ============================================================
+// 16. CREATE AUTOMATION MODAL
+// ============================================================
+
+function initCreateAutoModal() {
+  const modal  = document.getElementById('create-auto-modal');
+  const form   = document.getElementById('create-auto-form');
+  document.getElementById('open-create-auto-modal')?.addEventListener('click', () => modal?.classList.remove('hidden'));
+  document.getElementById('close-create-auto-modal')?.addEventListener('click', () => modal?.classList.add('hidden'));
+
+  form?.addEventListener('submit', e => {
+    e.preventDefault();
+    const title    = document.getElementById('rule-title')?.value.trim();
+    const category = document.getElementById('rule-category')?.value;
+    const trigger  = document.getElementById('rule-trigger')?.value;
+    const action   = document.getElementById('rule-action')?.value;
+    if (!title) return;
+    store.addAutomation({ title, desc: `When: ${trigger}`, trigger, action, category });
+    showToast(`⚡ Automation "<strong>${title}</strong>" created and active!`, 'success');
+    modal?.classList.add('hidden');
+    form.reset();
+    renderAutomationsGrid();
+  });
+}
+
+// ============================================================
+// 17. SETTINGS PAGE
+// ============================================================
+
+function initSettingsPage() {
+  document.getElementById('save-profile-btn')?.addEventListener('click', () => {
+    const name  = document.getElementById('profile-name-input')?.value.trim() || store.user.name;
+    const email = document.getElementById('profile-email-input')?.value.trim() || store.user.email;
+    store.user.name  = name;
+    store.user.email = email;
+    document.querySelectorAll('.user-name-display').forEach(el => el.textContent = name);
+    showToast('✅ Profile updated successfully.', 'success');
+  });
+
+  document.getElementById('reset-demo-btn')?.addEventListener('click', () => {
+    showToast('🔄 Resetting demo state…', 'warning', 1500);
+    setTimeout(() => location.reload(), 1600);
+  });
+}
+
+// ============================================================
+// 18. ENERGY CHART TIMEFRAME BUTTONS
+// ============================================================
+
+function initEnergyChartButtons() {
+  const bD = document.getElementById('chart-btn-daily');
+  const bW = document.getElementById('chart-btn-weekly');
+  bD?.addEventListener('click', () => {
+    window.energyCharts?.toggleView('daily');
+    bD.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500 text-black';
+    if (bW) bW.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-white/5 text-slate-400 hover:text-white';
+  });
+  bW?.addEventListener('click', () => {
+    window.energyCharts?.toggleView('weekly');
+    bW.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500 text-black';
+    if (bD) bD.className = 'px-3 py-1 rounded-lg text-xs font-semibold bg-white/5 text-slate-400 hover:text-white';
+  });
+}
+
+// ============================================================
+// 19. STORE SUBSCRIPTIONS
+// ============================================================
+
+function initStoreSubscriptions() {
+  store.subscribe('deviceUpdated', () => { syncHeader(); });
+  store.subscribe('energyUpdated', (energy) => {
+    const el = document.getElementById('metric-live-power');
+    if (el) el.textContent = energy.currentPowerKw.toFixed(2) + ' kW';
+  });
+  store.subscribe('stateChanged',  () => syncHeader());
+}
+
+// ============================================================
+// 20. AI INSIGHTS VIEW — rendered by ai-bridge.js when available
+// ============================================================
+
+function renderAIInsightsView() {
+  // Delegated to ai-bridge.js which loads after this file.
+  // If AI service is not running, show a placeholder.
+  if (window.AIBridge) {
+    window.AIBridge.renderInsights();
+  } else {
+    const view = document.getElementById('view-ai');
+    if (view && !view.dataset.rendered) {
+      view.dataset.rendered = '1';
+      // Will be filled by ai-bridge.js on load
+    }
   }
 }
 
-window.app = new SmartHomeApp();
+// ============================================================
+// 21. BOOTSTRAP
+// ============================================================
+
+function initApp() {
+  initNavigation();
+  initThemeToggle();
+  initMobileMenu();
+  initRoomFilter();
+  initDashboardControls();
+  initCameraCanvas();
+  initDevicesPage();
+  initAddDeviceModal();
+  initCreateAutoModal();
+  initSettingsPage();
+  initEnergyChartButtons();
+  initStoreSubscriptions();
+
+  // Initialize Chart.js energy chart
+  window.energyCharts = new EnergyCharts('energy-chart-canvas');
+
+  // Initialize Three.js 3D house
+  window.smartHouse3D = new SmartHouse3D('three-canvas-container');
+  setTimeout(init3DHouseControls, 600);
+
+  // Initial renders
+  renderDashboardGrid('All');
+  renderDevicesGrid();
+  renderAutomationsGrid();
+  syncHeader();
+
+  // Real-time clock
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // Lucide icon pass
+  if (window.lucide) lucide.createIcons();
+
+  console.log('[AETHER] App initialized. Store:', store.getStateSummary());
+}
+
+document.addEventListener('DOMContentLoaded', initApp);

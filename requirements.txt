@@ -1,0 +1,29 @@
+# ============================================================
+# AETHER Smart Home — Python Dependencies
+# ============================================================
+# Core web framework
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+
+# ML / Data Science
+scikit-learn==1.4.2
+numpy==1.26.4
+pandas==2.2.2
+joblib==1.4.2
+scipy==1.13.0
+
+# Time-series (lightweight alternative to Prophet)
+statsmodels==0.14.2
+
+# LLM integration (graceful fallback if key absent)
+openai==1.30.1
+python-dotenv==1.0.1
+
+# HTTP client (frontend → AI service polling)
+httpx==0.27.0
+
+# Database
+# SQLite is stdlib — no extra package needed
+
+# Utilities
+python-multipart==0.0.9
